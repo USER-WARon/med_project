@@ -1,0 +1,35 @@
+:root { 
+    --bg: #080810; 
+    --card-bg: rgba(255,255,255,0.04); 
+    --text: #fff; 
+    --accent: #3b82f6; 
+    --critical: #ff3b5c; 
+    --moderate: #f59e0b;
+    --normal: #10b981;
+}
+
+body { margin: 0; font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); }
+
+header { display: flex; justify-content: space-between; align-items: center; padding: 20px 30px; background: rgba(8,8,16,0.9); border-bottom: 1px solid rgba(255,255,255,0.1); }
+.logo { font-size: 20px; font-weight: 800; }
+
+button { padding: 10px 15px; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; background: var(--card-bg); color: var(--text); transition: 0.2s; }
+button.active { background: var(--accent); }
+.btn-primary { width: 100%; padding: 15px; background: linear-gradient(135deg, #dc2626, #b91c1c); margin-top: 20px; font-size: 16px; border-radius: 12px; }
+.btn-outline { background: rgba(59,130,246,0.1); color: var(--accent); border: 1px solid var(--accent); }
+
+main { padding: 30px; max-width: 900px; margin: 0 auto; }
+h1 { font-size: 24px; margin-bottom: 10px; }
+hr { border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 30px 0; }
+
+.upload-section { padding: 30px; border: 2px dashed rgba(59,130,246,0.4); border-radius: 12px; text-align: center; background: rgba(59,130,246,0.03); }
+.upload-section p { font-size: 13px; color: gray; margin-bottom: 15px; }
+.status-text { margin-top: 15px; font-size: 13px; font-weight: bold; }
+
+.grid-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; }
+input { width: 100%; padding: 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #fff; box-sizing: border-box; font-family: monospace;}
+
+.patient-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px; }
+.patient-card { background: var(--card-bg); border: 1px solid rgba(255,255,255,0.1); padding: 20px; border-radius: 16px; }
+.patient-card h3 { margin: 0 0 5px 0; }
+.score-badge { display: inline-block; padding: 6px 12px; border-radius: 8px; font-family: monospace; font-size: 18px; font-weight: bold; margin-top: 10px; }

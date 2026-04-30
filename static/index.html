@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HemaGuard ML Risk Engine</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+    <header>
+        <div class="logo">🩺 HemaGuard</div>
+        <nav>
+            <button id="nav-admit" class="active">Admit Patient</button>
+            <button id="nav-dashboard">Senior ICU Dashboard</button>
+        </nav>
+    </header>
+
+    <main id="app-content">
+        <section id="view-admit" class="view active">
+            <h1>Admit Patient</h1>
+            
+            <div class="upload-section" id="upload-box">
+                <h3>📄 Upload Blood Report</h3>
+                <p>Upload a PDF or Image. The AI will extract the values.</p>
+                <input type="file" id="report-upload" accept=".pdf, image/jpeg, image/png" style="display: none;">
+                <button type="button" class="btn-outline" onclick="document.getElementById('report-upload').click()">Browse Files</button>
+                <div id="upload-status" class="status-text"></div>
+            </div>
+
+            <!-- 👇 NEW: This is where the JS will render the OCR Preview -->
+            <div id="extraction-preview" style="display: none;"></div>
+
+            <hr>
+
+            <!-- Manual Override Form -->
+            <form id="admit-form">
+                <div class="grid-inputs">
+                    <!-- 👇 NEW: Patient ID added here -->
+                    <input type="text" id="p-id" placeholder="Patient ID (Optional)">
+                    <input type="text" id="p-name" placeholder="Patient Name" required>
+                    <input type="number" id="p-age" placeholder="Age" required>
+                </div>
+                
+                <div class="grid-inputs">
+                    <!-- All 12 Parameters -->
+                    <input type="number" step="0.1" id="val-hgb" placeholder="Hemoglobin">
+                    <input type="number" step="0.1" id="val-wbc" placeholder="WBC">
+                    <input type="number" step="0.1" id="val-plt" placeholder="Platelets">
+                    <input type="number" step="0.1" id="val-creat" placeholder="Creatinine">
+                    <input type="number" step="0.1" id="val-sugar" placeholder="Blood Sugar">
+                    <input type="number" step="0.1" id="val-urea" placeholder="Urea">
+                    <input type="number" step="0.1" id="val-sodium" placeholder="Sodium">
+                    <input type="number" step="0.1" id="val-potassium" placeholder="Potassium">
+                    <input type="number" step="0.1" id="val-chloride" placeholder="Chloride">
+                    <input type="number" step="0.1" id="val-calcium" placeholder="Calcium">
+                    <input type="number" step="0.1" id="val-albumin" placeholder="Albumin">
+                    <input type="number" step="0.1" id="val-bilirubin" placeholder="Bilirubin">
+                </div>
+                
+                <button type="submit" class="btn-primary">⚡ Compute Risk & Admit</button>
+            </form>
+        </section>
+
+        <section id="view-dashboard" class="view" style="display: none;">
+            <h1>Senior ICU Dashboard</h1>
+            <p style="color: gray; margin-bottom: 20px;">Moderate & Critical cases</p>
+            <div id="patient-grid" class="patient-grid"></div>
+        </section>
+    </main>
+
+    <script src="/js/api.js"></script>
+    <script src="/js/ui.js"></script>
+    <script src="/js/main.js"></script>
+</body>
+</html>

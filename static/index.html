@@ -9,10 +9,46 @@
 <body>
     <header>
         <div class="logo">🩺 HemaGuard</div>
-        <nav>
-            <button id="nav-admit" class="active">Admit Patient</button>
-            <button id="nav-dashboard">Senior ICU Dashboard</button>
-        </nav>
+       <!-- UPDATE YOUR <nav> IN THE HEADER: -->
+<nav>
+    <button id="nav-admit" class="active">Admit Patient</button>
+    <button id="nav-dashboard">Senior ICU Dashboard</button>
+    <button id="nav-intern">Intern Dashboard</button> <!-- 👈 ADD THIS -->
+</nav>
+
+<!-- ADD THIS NEW SECTION INSIDE <main id="app-content"> (Below the Senior dashboard): -->
+<section id="view-intern" class="view" style="display: none;">
+    <h1>🩺 Intern Review Dashboard</h1>
+    <p style="color: gray; margin-bottom: 20px;">Standard / Normal Risk Patient Queue</p>
+    
+    <button id="btn-refresh-intern" class="btn-outline" style="margin-bottom: 20px;">🔄 Refresh Queue</button>
+
+    <div style="background: var(--box-bg, #111827); border-radius: 8px; overflow: hidden; border: 1px solid #333;">
+        <table style="width: 100%; border-collapse: collapse; text-align: left;">
+            <thead style="background: #1a2333; color: gray; font-size: 14px;">
+                <tr>
+                    <th style="padding: 15px;">Patient ID</th>
+                    <th style="padding: 15px;">Name</th>
+                    <th style="padding: 15px;">Age</th>
+                    <th style="padding: 15px;">Risk Score</th>
+                    <th style="padding: 15px;">Action</th>
+                </tr>
+            </thead>
+            <tbody id="intern-table-body">
+                <tr><td colspan="5" style="text-align: center; padding: 30px;">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+<section id="view-dashboard" class="view" style="display: none;">
+            <h1>Senior ICU Dashboard</h1>
+            <p style="color: gray; margin-bottom: 20px;">Moderate & Critical cases</p>
+            
+            <!-- 👇 NEW: Refresh Button -->
+            <button id="btn-refresh-senior" class="btn-outline" style="margin-bottom: 20px;">🔄 Refresh ICU Queue</button>
+            
+            <div id="patient-grid" class="patient-grid"></div>
+        </section>
     </header>
 
     <main id="app-content">

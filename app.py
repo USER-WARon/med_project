@@ -1,4 +1,3 @@
-
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import joblib
@@ -15,20 +14,19 @@ import json
 import re
 import requests
 import fitz  # PyMuPDF for handling PDF uploads
-import os
 
 # 🔧 CONFIGURATION
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-GROQ_API_KEY="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"
+GROQ_API_KEY = "apikey"
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 app = Flask(__name__, static_folder='static', static_url_path='')
-CORS(app) # 🌉 Allows Live Server to talk to this Flask backend
+CORS(app) 
 
 # 🤖 LOAD HISTGRADIENT MODEL
 model = joblib.load('risk_engine_model.joblib')
 
-# 🗄️ DATABASE SETUP (Now with UNIQUE patient_id)
+# 🗄️ DATABASE SETUP
 def get_db_connection():
     return sqlite3.connect('patients.db', check_same_thread=False)
 
@@ -41,7 +39,8 @@ with get_db_connection() as conn:
         age INTEGER, 
         time TEXT, 
         score REAL, 
-        category TEXT
+        category TEXT,
+        assigned_to TEXT
     )''')
 
 # 🛡️ BULLETPROOF SANITIZER
@@ -53,12 +52,10 @@ def safe_float(val):
     except:
         return None
 
-# 🔁 NUMBER REGEX HELPER
 def extract_val(pattern, text):
     m = re.search(pattern, text, re.I)
     return float(m.group(1)) if m else None
 
-# 🔁 STRING REGEX HELPER (For Patient IDs and Names)
 def extract_str(pattern, text):
     m = re.search(pattern, text, re.I)
     return m.group(1).strip() if m else None
@@ -70,6 +67,27 @@ def generate_patient_id(name, age):
 def serve():
     return send_from_directory(app.static_folder, 'index.html')
 
+# 🔀 INTERN DASHBOARD ENDPOINT
+@app.route('/api/intern-dashboard', methods=['GET'])
+def get_intern_cases():
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.execute("SELECT patient_id, name, age, time, score FROM reports WHERE assigned_to = 'Intern Dashboard' ORDER BY time DESC")
+            cases = [{"patient_id": row[0], "name": row[1], "age": row[2], "time": row[3], "score": row[4]} for row in cursor.fetchall()]
+        return jsonify({"cases": cases})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+@app.route('/api/senior-dashboard', methods=['GET'])
+def get_senior_cases():
+    try:
+        with get_db_connection() as conn:
+            # Fetch patients assigned to Senior Physician, ordering by highest risk score first!
+            cursor = conn.execute("SELECT patient_id, name, age, time, score, category FROM reports WHERE assigned_to = 'Senior Physician' ORDER BY score DESC")
+            cases = [{"patient_id": row[0], "name": row[1], "age": row[2], "time": row[3], "score": row[4], "category": row[5]} for row in cursor.fetchall()]
+        return jsonify({"cases": cases})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/predict', methods=['POST'])
 def predict():
     try:
@@ -77,15 +95,12 @@ def predict():
         name = data.get("patientName", "unknown")
         age = data.get("patientAge", 0)
         
-        # 👇 Prefer the real Patient ID from the report, fallback to Hash if missing
-        pid = data.get("patientId")
-        if not pid:
-            pid = generate_patient_id(name, age)
+        pid = data.get("patientId") or generate_patient_id(name, age)
 
         cbc = data.get("cbc", {})
         cmp = data.get("cmp", {})
 
-        # 1. Clean Extraction (All 12 Parameters)
+        # 1. Clean Extraction (Explicitly mapped for 12-parameter NaN model)
         features = {
             "hemoglobin": safe_float(cbc.get("hemoglobin")),
             "wbc": safe_float(cbc.get("wbc")),
@@ -101,122 +116,77 @@ def predict():
             "bilirubin": safe_float(cmp.get("bilirubin"))
         }
 
-        # 2. Automatic Unit Normalization
-        if features["wbc"] is not None and features["wbc"] > 100:
-            features["wbc"] = features["wbc"] / 1000.0
-        if features["platelets"] is not None and features["platelets"] > 2000:
-            features["platelets"] = features["platelets"] / 1000.0
+        # 📊 2. DATA CONFIDENCE CALCULATOR
+        present_params = sum(1 for v in features.values() if v is not None)
+        confidence = round((present_params / 12) * 100)
 
-        # 3. Model Prediction (dtype=float safely handles missing data as NaN)
+        # 3. Unit Normalization
+        if features["wbc"] is not None and features["wbc"] > 100: features["wbc"] /= 1000.0
+        if features["platelets"] is not None and features["platelets"] > 2000: features["platelets"] /= 1000.0
+
+        # 4. Model Prediction (Logic is now inside the AI model)
         df_input = pd.DataFrame([features], dtype=float)
         score = model.predict(df_input)[0]
         category = "Critical" if score >= 70 else "Moderate" if score >= 40 else "Normal"
 
-        # 4. Save to Database (THE UPSERT FIX)
+        # 🔀 5. TRIAGE ROUTING
+        assigned_to = "Intern Dashboard" if category == "Normal" else "Senior Physician"
+
+        # 6. Database Upsert
         with get_db_connection() as conn:
             conn.execute('''
-                INSERT INTO reports (patient_id, name, age, time, score, category)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO reports (patient_id, name, age, time, score, category, assigned_to)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(patient_id) DO UPDATE SET
                     time = excluded.time,
                     score = excluded.score,
-                    category = excluded.category
-            ''', (pid, name, age, datetime.now().isoformat(), round(score, 1), category))
+                    category = excluded.category,
+                    assigned_to = excluded.assigned_to
+            ''', (pid, name, age, datetime.now().isoformat(), round(score, 1), category, assigned_to))
 
-        return jsonify({"score": round(score, 1), "category": category})
+        return jsonify({
+            "score": round(score, 1), 
+            "category": category, 
+            "confidence": confidence,
+            "assigned_to": assigned_to
+        })
 
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-
 @app.route('/api/extract', methods=['POST'])
-
-
 def extract():
     try:
         data = request.json
         raw_b64 = data.get('file_base64', '')
         
-        print("\n=== 🔍 NEW UPLOAD DIAGNOSTIC ===")
-        print(f"1. Raw B64 Length from Frontend: {len(raw_b64)}")
-
-        # 🧹 STRIP HTML5 PREFIX
         if ',' in raw_b64:
             raw_b64 = raw_b64.split(',')[1]
             
         img_bytes = base64.b64decode(raw_b64)
-        print(f"2. Decoded File Size: {len(img_bytes)} bytes")
 
-        # 🖼️ ATTEMPT IMAGE DECODING
+        # 🖼️ DECODE IMAGE OR PDF
         np_arr = np.frombuffer(img_bytes, np.uint8)
         img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
-        if img is not None:
-            print("3. ✅ Successfully read as standard Image.")
-        else:
-            print("3. ❌ OpenCV rejected it as an image. Trying PyMuPDF (PDF)...")
-            import fitz  # PyMuPDF
+        if img is None:
             doc = fitz.open(stream=img_bytes, filetype="pdf")
-            print(f"   -> PDF successfully opened! Total Pages: {len(doc)}")
-            
             page = doc.load_page(0)
             pix = page.get_pixmap(dpi=300)
-            
-            # 🛡️ THE BULLETPROOF CONVERSION
-            png_bytes = pix.tobytes("png")
-            img = cv2.imdecode(np.frombuffer(png_bytes, np.uint8), cv2.IMREAD_COLOR)
-            
-            if img is not None:
-                print("   -> ✅ PDF successfully converted to OpenCV Image!")
-            else:
-                print("   -> ❌ CRITICAL: PDF converted to bytes, but OpenCV failed to read it.")
+            img = cv2.imdecode(np.frombuffer(pix.tobytes("png"), np.uint8), cv2.IMREAD_COLOR)
 
         if img is None:
             return jsonify({"error": "Failed to decode the uploaded file."}), 400
 
-        print("4. Proceeding to Tesseract OCR...")
-        
-        # 🔬 Pre-processing
+        # 🔬 Pre-processing & OCR
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        
-        # ... [KEEP THE REST OF YOUR OCR AND AI LOGIC HERE] ...
-        
         gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
         _, img_p = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        kernel = np.ones((1, 1), np.uint8)
-        img_p = cv2.dilate(img_p, kernel, iterations=1)
+        text = pytesseract.image_to_string(img_p, config=r'--oem 3 --psm 6')[:2500]
 
-        custom_config = r'--oem 3 --psm 6'
-        text = pytesseract.image_to_string(img_p, config=custom_config)[:2500]
-
-        print("\n" + "="*50)
-        print("RAW OCR TEXT DETECTED:")
-        print(text[:500]) 
-        print("="*50 + "\n")
-
-        # 🔥 ANTI-HALLUCINATION PROMPT
-        prompt = f"""
-        You are a Medical Data Specialist. Extract data from this OCR text.
-        
-        STRICT EXTRACTION RULES:
-        1. FIND THE PATIENT ID: Look for "Patient ID", "PID", or similar. 
-        2. FIND THE PATIENT NAME: Look specifically for text following "Patient Name:", "Name:", or "Patient:". 
-        3. IGNORE LOGOS: Do NOT extract names from the laboratory header (ignore "Drlogy", "Pathology Lab").
-        4. FIND THE AGE: Look for "Age:" or "Yrs". If not found, output null. DO NOT GUESS.
-        5. NO SUBSTITUTIONS: If the CURRENT result is unreadable, garbled (e.g. "isi' Sl"), or missing, YOU MUST OUTPUT null. DO NOT grab the "Previous" result. DO NOT grab the reference range. 
-        6. Return ONLY valid JSON.
-        
-        TEXT: {text}
-        
-        FORMAT:
-        {{
-          "patientId": null,
-          "patientName": null, "patientAge": null,
-          "cbc": {{ "hemoglobin": null, "wbc": null, "platelets": null }},
-          "cmp": {{ "creatinine": null, "glucose": null, "urea": null, "sodium": null, "potassium": null, "chloride": null, "calcium": null, "albumin": null, "bilirubin": null }}
-        }}
-        """
+        # 🔥 AI EXTRACTION
+        prompt = f"Extract medical data from this text into JSON. Format: {{'patientId': null, 'patientName': null, 'patientAge': null, 'cbc': {{'hemoglobin': null, 'wbc': null, 'platelets': null}}, 'cmp': {{'creatinine': null, 'glucose': null, 'urea': null, 'sodium': null, 'potassium': null, 'chloride': null, 'calcium': null, 'albumin': null, 'bilirubin': null}}}}. TEXT: {text}"
 
         res = requests.post(GROQ_API_URL, json={
             "model": "llama-3.1-8b-instant",
@@ -225,41 +195,13 @@ def extract():
             "response_format": { "type": "json_object" }
         }, headers={"Authorization": f"Bearer {GROQ_API_KEY}"})
 
-        # 🛡️ API RESPONSE SAFETY CHECK
-        res_data = res.json()
-        if 'choices' not in res_data:
-            print("❌ GROQ API ERROR:", res_data)
-            return jsonify({"error": "AI Provider Error", "details": res_data}), 500
+        parsed = res.json()['choices'][0]['message']['content']
+        parsed = json.loads(parsed)
 
-        output = res_data['choices'][0]['message']['content']
-        output = output.replace("```json", "").replace("```", "").strip()
-
-        # 🛡️ JSON SAFETY PARSING
-        match = re.search(r'\{.*\}', output, re.DOTALL)
-        if not match: 
-            return jsonify({"error": "No JSON found in AI response"}), 500
-            
-        json_str = match.group(0)
-        parsed = json.loads(json_str)
-
-        # ---------------------------------------------------------
-        # 🔁 REDUNDANT REGEX FALLBACK SYSTEM
-        # ---------------------------------------------------------
-        
-        # 0. Patient ID Fallback
-        if not parsed.get("patientId"):
-            parsed["patientId"] = extract_str(r"Patient ID[^\w]*([A-Za-z0-9]+)", text)
-
-        # 1. Name Fallback (Bypasses the "Drlogy" hallucination)
+        # 🔁 FALLBACKS
         if not parsed.get("patientName") or "Drlogy" in str(parsed.get("patientName")):
-            name_match = re.search(r'(?:Name|Patient|Mr|Ms|Mrs)\.?\s*:?\s*([A-Za-z\s.]+)', text, re.I)
-            if name_match:
-                parsed["patientName"] = name_match.group(1).strip()
-
-        # 2. Values Fallback (Locked to the SAME LINE using [^\d\n])
-        parsed["cbc"]["hemoglobin"] = safe_float(parsed["cbc"].get("hemoglobin")) or extract_val(r"hemoglobin[^\d\n]{0,40}?([\d.]+)", text)
-        parsed["cbc"]["wbc"] = safe_float(parsed["cbc"].get("wbc")) or extract_val(r"wbc[^\d\n]{0,40}?([\d.]+)", text)
-        parsed["cmp"]["glucose"] = safe_float(parsed["cmp"].get("glucose")) or extract_val(r"(glucose|sugar)[^\d\n]{0,40}?([\d.]+)", text)
+            m = re.search(r'(?:Name|Patient|Mr|Ms|Mrs)\.?\s*:?\s*([A-Za-z\s.]+)', text, re.I)
+            if m: parsed["patientName"] = m.group(1).strip()
 
         return jsonify({"extracted": parsed})
 

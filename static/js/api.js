@@ -27,5 +27,27 @@ const api = {
             console.error("Extraction failed:", error);
             return null;
         }
+    },
+    // Add this inside your `const api = { ... }` object
+    async getInternCases() {
+        try {
+            const response = await fetch('/api/intern-dashboard');
+            if (!response.ok) throw new Error("Intern API Error");
+            return await response.json();
+        } catch (error) {
+            console.error("Failed to fetch intern cases:", error);
+            return null;
+        }
+    },
+    // Add this inside your `const api = { ... }` object
+    async getSeniorCases() {
+        try {
+            const response = await fetch('/api/senior-dashboard');
+            if (!response.ok) throw new Error("Senior API Error");
+            return await response.json();
+        } catch (error) {
+            console.error("Failed to fetch senior cases:", error);
+            return null;
+        }
     }
 };

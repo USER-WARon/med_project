@@ -1,12 +1,18 @@
 import pandas as pd
 import numpy as np
-from sklearn.ensemble import HistGradientBoostingRegressor
 import joblib
 
+# 👇 UNLOCK EXPERIMENTAL FEATURES (Required for older sklearn versions)
+from sklearn.experimental import enable_hist_gradient_boosting  
+from sklearn.ensemble import HistGradientBoostingRegressor
+
+# Set seed for reproducible results
 np.random.seed(42)
 n_samples = 6000
 
-# 1. GENERATE SICK PATIENTS
+print("Generating synthetic patient data...")
+
+# 1. GENERATE SICK PATIENTS (Standard Spaces used here)
 data = {
     'hemoglobin': np.random.uniform(5, 20, n_samples),
     'wbc': np.random.uniform(2, 25, n_samples),
@@ -23,7 +29,7 @@ data = {
 }
 df = pd.DataFrame(data)
 
-# 2. INJECT HEALTHY PATIENTS (Prevents the 46.5 bias)
+# 2. INJECT HEALTHY PATIENTS
 healthy_data = {
     'hemoglobin': np.random.uniform(13, 16, 1000),
     'wbc': np.random.uniform(5, 10, 1000),
@@ -41,7 +47,7 @@ healthy_data = {
 healthy_df = pd.DataFrame(healthy_data)
 df = pd.concat([df, healthy_df], ignore_index=True)
 
-# 3. TEACH IT TO HANDLE MISSING DATA (The HistGradient Superpower)
+# 3. TEACH IT TO HANDLE MISSING DATA
 cmp_cols = ['creatinine', 'bloodSugar', 'urea', 'sodium', 'potassium', 'chloride', 'calcium', 'albumin', 'bilirubin']
 cbc_only_indices = df.sample(frac=0.30).index 
 df.loc[cbc_only_indices, cmp_cols] = np.nan
@@ -80,13 +86,16 @@ def calculate_synthetic_risk(row):
     score += score_range(row['bilirubin'], 0.3, 1.2, weight=2)
     return min(100, max(0, score))
 
+print("Applying clinical weighting system...")
 df['target_risk_score'] = df.apply(calculate_synthetic_risk, axis=1)
+
 X = df.drop('target_risk_score', axis=1)
 y = df['target_risk_score']
 
 # 5. TRAIN NEW MODEL
-print("Training NaN-aware HistGradientBoosting model...")
+print("Training NaN-aware HistGradientBoosting model... (This may take a few seconds)")
 model = HistGradientBoostingRegressor(max_iter=150, max_depth=12, random_state=42)
 model.fit(X, y)
+
 joblib.dump(model, 'risk_engine_model.joblib')
-print("✅ HistGradient model trained and saved successfully!")
+print("✅ HistGradient model trained and saved successfully as 'risk_engine_model.joblib'!")

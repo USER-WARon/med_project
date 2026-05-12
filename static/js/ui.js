@@ -109,7 +109,8 @@ const ui = {
                 <p style="font-size: 12px; color: gray; margin-top: 5px;">
                     Assessed: ${timeStr}
                 </p>
-                <button style="background: transparent; cursor: pointer; width: 100%; margin-top: 15px; padding: 8px; border: 1px solid ${color}; color: ${color}; border-radius: 4px;" onclick="alert('Opening full file for ${patient.name}')">View Full Report</button>
+                // Change this line inside renderSeniorCases:
+                <button style="background: transparent; cursor: pointer; width: 100%; margin-top: 15px; padding: 8px; border: 1px solid ${color}; color: ${color}; border-radius: 4px;" onclick="ui.openModal('${patient.name}', '${patient.patient_id}', ${patient.score}, '${patient.category}', '${timeStr}')">View Full Report</button>
             `;
             
             grid.appendChild(card);
@@ -138,5 +139,30 @@ const ui = {
             `;
             tbody.appendChild(tr);
         });
+    },
+// Add these right at the bottom of the `const ui = { ... }` object!
+    
+    // 6. Open the Patient Modal
+    openModal(name, id, score, category, time) {
+        // Inject the data into the HTML
+        document.getElementById('modal-name').innerText = name;
+        document.getElementById('modal-id').innerText = `ID: ${id}`;
+        document.getElementById('modal-score').innerText = score;
+        document.getElementById('modal-category').innerText = category;
+        document.getElementById('modal-time').innerText = time || "Just now";
+
+        // Color code the category in the modal
+        const catEl = document.getElementById('modal-category');
+        if (category === "Critical") catEl.style.color = "#EF4444";
+        else if (category === "Moderate") catEl.style.color = "#F59E0B";
+        else catEl.style.color = "#10B981";
+
+        // Show the modal (using flex to keep it centered)
+        document.getElementById('patient-modal').style.display = 'flex';
+    },
+
+    // 7. Close the Patient Modal
+    closeModal() {
+        document.getElementById('patient-modal').style.display = 'none';
     }
 };

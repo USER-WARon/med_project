@@ -1,11 +1,15 @@
+
+import os
+import sqlite3
+import hashlib
+import traceback
+from datetime import datetime
+import uuid # Used for generating unique image filenames
+
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import joblib
 import pandas as pd
-import traceback
-import sqlite3
-import hashlib
-from datetime import datetime
 import pytesseract
 import cv2
 import base64
@@ -17,11 +21,20 @@ import fitz  # PyMuPDF for handling PDF uploads
 
 # 🔧 CONFIGURATION
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-GROQ_API_KEY = "apikey"
+GROQ_API_KEY = "" # Add your Groq API key here
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
+# 🔔 WEBHOOK URL (Change this to your n8n Production URL!)
+N8N_WEBHOOK_URL = "http://localhost:5678/webhook-test/08a904c5-f9c8-49cf-b08d-37499ee82428"
+
+# 🚀 FLASK SETUP
 app = Flask(__name__, static_folder='static', static_url_path='')
 CORS(app) 
+
+# 📁 FOLDER SETUP FOR IMAGES
+UPLOAD_FOLDER = os.path.join('static', 'reports')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 # 🤖 LOAD HISTGRADIENT MODEL
 model = joblib.load('risk_engine_model.joblib')
@@ -40,7 +53,8 @@ with get_db_connection() as conn:
         time TEXT, 
         score REAL, 
         category TEXT,
-        assigned_to TEXT
+        assigned_to TEXT,
+        image_file_path TEXT 
     )''')
 
 # 🛡️ BULLETPROOF SANITIZER
@@ -63,27 +77,51 @@ def extract_str(pattern, text):
 def generate_patient_id(name, age):
     return hashlib.sha256(f"{name}_{age}".encode()).hexdigest()
 
+# 🔔 NOTIFICATION SYSTEM LOGIC
+def trigger_doctor_alert(patient_id, name, score, category, features):
+    """Sends an alert to n8n for ALL cases. n8n will handle the routing."""
+    
+    payload = {
+        "patient_id": patient_id,
+        "name": name,
+        "score": round(score, 1),
+        "category": category,
+        "timestamp": datetime.now().isoformat(),
+        # Passing raw features in case you want to use them in n8n emails/messages later
+        "clinical_data": features 
+    }
+
+    try:
+        # 5-second timeout so it doesn't freeze your API if n8n is slow
+        response = requests.post(N8N_WEBHOOK_URL, json=payload, timeout=5) 
+        if response.status_code == 200:
+            print(f"[Alert Success] {category} payload sent to n8n for {patient_id}")
+        else:
+            print(f"[Alert Failed] n8n returned status: {response.status_code}")
+    except Exception as e:
+        print(f"[Alert Error] Connection to n8n webhook failed: {e}")
+
 @app.route('/')
 def serve():
     return send_from_directory(app.static_folder, 'index.html')
 
-# 🔀 INTERN DASHBOARD ENDPOINT
+# 🔀 DASHBOARD ENDPOINTS
 @app.route('/api/intern-dashboard', methods=['GET'])
 def get_intern_cases():
     try:
         with get_db_connection() as conn:
-            cursor = conn.execute("SELECT patient_id, name, age, time, score FROM reports WHERE assigned_to = 'Intern Dashboard' ORDER BY time DESC")
-            cases = [{"patient_id": row[0], "name": row[1], "age": row[2], "time": row[3], "score": row[4]} for row in cursor.fetchall()]
+            cursor = conn.execute("SELECT patient_id, name, age, time, score, image_file_path FROM reports WHERE assigned_to = 'Intern Dashboard' ORDER BY time DESC")
+            cases = [{"patient_id": row[0], "name": row[1], "age": row[2], "time": row[3], "score": row[4], "image_file_path": row[5]} for row in cursor.fetchall()]
         return jsonify({"cases": cases})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 @app.route('/api/senior-dashboard', methods=['GET'])
 def get_senior_cases():
     try:
         with get_db_connection() as conn:
-            # Fetch patients assigned to Senior Physician, ordering by highest risk score first!
-            cursor = conn.execute("SELECT patient_id, name, age, time, score, category FROM reports WHERE assigned_to = 'Senior Physician' ORDER BY score DESC")
-            cases = [{"patient_id": row[0], "name": row[1], "age": row[2], "time": row[3], "score": row[4], "category": row[5]} for row in cursor.fetchall()]
+            cursor = conn.execute("SELECT patient_id, name, age, time, score, category, image_file_path FROM reports WHERE assigned_to = 'Senior Physician' ORDER BY score DESC")
+            cases = [{"patient_id": row[0], "name": row[1], "age": row[2], "time": row[3], "score": row[4], "category": row[5], "image_file_path": row[6]} for row in cursor.fetchall()]
         return jsonify({"cases": cases})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -96,9 +134,10 @@ def predict():
         age = data.get("patientAge", 0)
         
         pid = data.get("patientId") or generate_patient_id(name, age)
-
         cbc = data.get("cbc", {})
         cmp = data.get("cmp", {})
+        
+        image_file_path = data.get("image_file_path", None)
 
         # 1. Clean Extraction (Explicitly mapped for 12-parameter NaN model)
         features = {
@@ -124,7 +163,7 @@ def predict():
         if features["wbc"] is not None and features["wbc"] > 100: features["wbc"] /= 1000.0
         if features["platelets"] is not None and features["platelets"] > 2000: features["platelets"] /= 1000.0
 
-        # 4. Model Prediction (Logic is now inside the AI model)
+        # 4. Model Prediction
         df_input = pd.DataFrame([features], dtype=float)
         score = model.predict(df_input)[0]
         category = "Critical" if score >= 70 else "Moderate" if score >= 40 else "Normal"
@@ -132,17 +171,21 @@ def predict():
         # 🔀 5. TRIAGE ROUTING
         assigned_to = "Intern Dashboard" if category == "Normal" else "Senior Physician"
 
-        # 6. Database Upsert
+        # 🔔 5.5 FIRE ALERT TO N8N BEFORE DATABASE UPDATE
+        trigger_doctor_alert(pid, name, score, category, features)
+
+        # 6. Database Upsert 
         with get_db_connection() as conn:
             conn.execute('''
-                INSERT INTO reports (patient_id, name, age, time, score, category, assigned_to)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO reports (patient_id, name, age, time, score, category, assigned_to, image_file_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(patient_id) DO UPDATE SET
                     time = excluded.time,
                     score = excluded.score,
                     category = excluded.category,
-                    assigned_to = excluded.assigned_to
-            ''', (pid, name, age, datetime.now().isoformat(), round(score, 1), category, assigned_to))
+                    assigned_to = excluded.assigned_to,
+                    image_file_path = excluded.image_file_path
+            ''', (pid, name, age, datetime.now().isoformat(), round(score, 1), category, assigned_to, image_file_path))
 
         return jsonify({
             "score": round(score, 1), 
@@ -179,6 +222,12 @@ def extract():
         if img is None:
             return jsonify({"error": "Failed to decode the uploaded file."}), 400
 
+        # Save the decoded image to disk before running OCR
+        unique_filename = f"report_{uuid.uuid4().hex[:8]}.png"
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+        cv2.imwrite(filepath, img)
+        db_image_path = f"reports/{unique_filename}" 
+
         # 🔬 Pre-processing & OCR
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
@@ -203,7 +252,10 @@ def extract():
             m = re.search(r'(?:Name|Patient|Mr|Ms|Mrs)\.?\s*:?\s*([A-Za-z\s.]+)', text, re.I)
             if m: parsed["patientName"] = m.group(1).strip()
 
-        return jsonify({"extracted": parsed})
+        return jsonify({
+            "extracted": parsed,
+            "image_file_path": db_image_path 
+        })
 
     except Exception as e:
         traceback.print_exc()
